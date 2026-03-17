@@ -1,0 +1,10 @@
+{
+  "name": "@trustwork/api",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@midnight-ntwrk/midnight-js-contracts": "^1.0.0",
+    "@midnight-ntwrk/midnight-js-types": "^1.0.0"
+  },
+  "devDependencies": { "typescript": "^5.3.3" }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@trustwork/cli",
+  "version": "1.0.0",
+  "bin": { "trustwork": "src/index.ts" },
+  "dependencies": {
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "^1.0.0",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "^1.0.0",
+    "@trustwork/api": "*"
+  },
+  "devDependencies": { "typescript": "^5.3.3", "@types/node": "^20.11.0" }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "trustwork-proof",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Privacy-preserving worker reputation verification on Midnight Network",
+  "workspaces": ["contract", "api", "cli"],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "compile-contract": "cd contract && compactc src/trustwork.compact"
+  },
+  "engines": { "node": ">=22.0.0" }
+}

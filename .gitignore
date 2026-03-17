@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.trustwork-state.json
+.env
