@@ -1,12 +1,29 @@
 {
   "name": "trustwork-proof",
   "version": "1.0.0",
+  "description": "Privacy-preserving worker reputation verifier built on Midnight Network",
   "private": true,
-  "description": "Privacy-preserving worker reputation verification on Midnight Network",
-  "workspaces": ["contract", "api", "cli"],
+  "type": "module",
   "scripts": {
-    "build": "npm run build --workspaces",
-    "compile-contract": "cd contract && compactc src/trustwork.compact"
+    "compile-contract": "compact compile contract/src/trustwork.compact contract/src/managed/trustwork",
+    "build": "tsc -p api/tsconfig.json && tsc -p cli/tsconfig.json",
+    "start": "node --loader ts-node/esm cli/src/index.ts"
   },
-  "engines": { "node": ">=22.0.0" }
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.14.0",
+    "@midnight-ntwrk/compact-js": "^1.0.0",
+    "@midnight-ntwrk/ledger": "^4.0.0",
+    "@midnight-ntwrk/midnight-js-contracts": "3.0.0",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "3.0.0",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "3.0.0",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "3.0.0",
+    "@midnight-ntwrk/midnight-js-network-id": "3.0.0",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "3.0.0",
+    "@midnight-ntwrk/midnight-js-types": "3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
 }
