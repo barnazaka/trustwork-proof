@@ -1,4 +1,4 @@
-# TrustWork Proof of Reputation
+# TrustWork Proof of Reputation 00000000000000000000000000
 
 A privacy-preserving worker reputation system built on [Midnight Network](https://midnight.network).
 
