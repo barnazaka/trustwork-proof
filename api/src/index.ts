@@ -1,85 +1,93 @@
-import {
-  createMidnightClient,
-  MidnightProviders,
-  DeployedContract,
-} from "@midnight-ntwrk/midnight-js-contracts";
-import { WalletProvider } from "@midnight-ntwrk/midnight-js-types";
-import * as crypto from "crypto";
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
+import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
+import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
+import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
+import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
+import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
+import { CompiledContract } from '@midnight-ntwrk/compact-js';
+import { TrustWork, witnesses } from '../../../contract/src/managed/trustwork/index.js';
 
-export type TrustWorkPrivateState = {
-  secretKey: Uint8Array;
-  reputationScore: number;
-  scoreNonce: Uint8Array;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const ZK_CONFIG_PATH = path.resolve(__dirname, '../../../contract/src/managed/trustwork');
+
+const PRIVATE_STATE_ID = 'trustworkPrivateState' as const;
+
+export const DEVNET_CONFIG = {
+  indexer: 'http://127.0.0.1:8088/api/v1/graphql',
+  indexerWS: 'ws://127.0.0.1:8088/api/v1/graphql',
+  node: 'http://127.0.0.1:9944',
+  proofServer: 'http://127.0.0.1:6300',
 };
 
-export function createWorkerPrivateState(score: number): TrustWorkPrivateState {
-  if (score < 0 || score > 100) {
-    throw new Error("Reputation score must be between 0 and 100");
-  }
+export type TrustWorkPrivateState = {
+  score: bigint;
+};
+
+const compiledContract = CompiledContract.make('trustwork', TrustWork.Contract).pipe(
+  CompiledContract.withVacantWitnesses,
+  CompiledContract.withCompiledFileAssets(ZK_CONFIG_PATH),
+);
+
+export const buildProviders = (
+  walletProvider: any,
+  midnightProvider: any,
+  config = DEVNET_CONFIG,
+) => {
+  setNetworkId('undeployed');
+  const zkConfigProvider = new NodeZkConfigProvider(ZK_CONFIG_PATH);
+
   return {
-    secretKey: crypto.getRandomValues(new Uint8Array(32)),
-    reputationScore: score,
-    scoreNonce: crypto.getRandomValues(new Uint8Array(32)),
+    privateStateProvider: levelPrivateStateProvider({
+      privateStateStoreName: PRIVATE_STATE_ID,
+      walletProvider,
+    }),
+    publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),
+    zkConfigProvider,
+    proofProvider: httpClientProofProvider(config.proofServer, zkConfigProvider),
+    walletProvider,
+    midnightProvider,
   };
-}
+};
 
-export function buildWitnessProvider(privateState: TrustWorkPrivateState) {
-  return {
-    secretKey: () => privateState.secretKey,
-    reputationScore: () => BigInt(privateState.reputationScore),
-    scoreNonce: () => privateState.scoreNonce,
-  };
-}
+export const deployTrustWork = async (providers: any, initialScore: bigint) => {
+  const initialPrivateState: TrustWorkPrivateState = { score: initialScore };
 
-export const TrustWorkAPI = {
-  async deploy(providers: any, wallet: any) {
-    const midnight = createMidnightClient(providers);
-    console.log("Deploying TrustWork contract...");
-    const deployed = await midnight.deployContract({}, wallet);
-    console.log(`Contract deployed at: ${deployed.deployTxData.public.contractAddress}`);
-    return deployed;
-  },
+  const deployed = await deployContract(providers, {
+    compiledContract,
+    privateStateId: PRIVATE_STATE_ID,
+    initialPrivateState,
+  });
 
-  async register(contract: any, privateState: TrustWorkPrivateState, providers: any) {
-    const witnessProvider = buildWitnessProvider(privateState);
-    const midnight = createMidnightClient(providers);
-    console.log("Registering worker with private reputation score...");
-    await midnight.callContract(
-      contract,
-      "register",
-      [BigInt(privateState.reputationScore)],
-      witnessProvider
-    );
-    console.log("Worker registered. Score committed on-chain. Actual score: private.");
-  },
+  console.log(`Contract deployed at: ${deployed.deployTxData.public.contractAddress}`);
+  return deployed;
+};
 
-  async verifyAboveThreshold(
-    contract: any,
-    threshold: number,
-    privateState: TrustWorkPrivateState,
-    providers: any
-  ): Promise<boolean> {
-    const witnessProvider = buildWitnessProvider(privateState);
-    const midnight = createMidnightClient(providers);
-    console.log(`Generating ZK proof that score >= ${threshold}...`);
-    try {
-      const result = await midnight.callContract(
-        contract,
-        "verify_above_threshold",
-        [BigInt(threshold)],
-        witnessProvider
-      );
-      return Boolean(result);
-    } catch {
-      return false;
-    }
-  },
+export const joinTrustWork = async (providers: any, contractAddress: string) => {
+  return await findDeployedContract(providers, {
+    contractAddress,
+    compiledContract,
+    privateStateId: PRIVATE_STATE_ID,
+    initialPrivateState: { score: 0n },
+  });
+};
 
-  async getWorkerCount(contract: any): Promise<bigint> {
-    return await contract.callEntryPoint("get_worker_count", []);
-  },
+export const register = async (contract: any, score: bigint) => {
+  const tx = await contract.callTx.register(score);
+  console.log(`Registered score. TX: ${tx.public.txId} in block ${tx.public.blockHeight}`);
+  return tx.public;
+};
 
-  async isRegistered(contract: any): Promise<boolean> {
-    return Boolean(await contract.callEntryPoint("is_registered", []));
-  },
+export const verifyAboveThreshold = async (contract: any, threshold: bigint) => {
+  const tx = await contract.callTx.verify_above_threshold(threshold);
+  console.log(`Verified. TX: ${tx.public.txId} in block ${tx.public.blockHeight}`);
+  return tx.public;
+};
+
+export const getContractState = async (providers: any, contractAddress: string) => {
+  const state = await providers.publicDataProvider.queryContractState(contractAddress);
+  if (!state) return null;
+  return TrustWork.ledger(state.data);
 };
