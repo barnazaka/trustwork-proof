@@ -1,121 +1,73 @@
-#!/usr/bin/env node
+import { createInterface } from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+import { randomBytes } from 'node:crypto';
+import { buildFreshWallet, buildWallet, createProviders } from './providers.js';
+import {
+  deployTrustWork,
+  joinTrustWork,
+  register,
+  verifyAboveThreshold,
+  getContractState,
+  DEVNET_CONFIG,
+} from '../../api/src/index.js';
 
-/**
- * TrustWork CLI
- *
- * Usage:
- *   trustwork deploy              - Deploy a new contract instance
- *   trustwork register            - Register as a worker with a private score
- *   trustwork verify <threshold>  - Verify score meets a threshold
- *   trustwork status              - Check contract state
- */
+const rli = createInterface({ input, output, terminal: true });
 
-import * as readline from "readline";
-import * as fs from "fs";
-import * as path from "path";
-import { TrustWorkAPI, createWorkerPrivateState, TrustWorkPrivateState } from "@trustwork/api";
+const ask = (q: string) => rli.question(q);
 
-const STATE_FILE = path.join(process.env.HOME || ".", ".trustwork-state.json");
+const main = async () => {
+  console.log('\n TrustWork Proof of Reputation - Midnight Network\n');
+  console.log('1) Create new wallet');
+  console.log('2) Restore wallet from seed');
 
-function loadState(): { privateState: TrustWorkPrivateState; contractAddress: string } | null {
-  try {
-    if (!fs.existsSync(STATE_FILE)) return null;
-    const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
-    return {
-      privateState: {
-        secretKey: new Uint8Array(raw.secretKey),
-        reputationScore: raw.reputationScore,
-        scoreNonce: new Uint8Array(raw.scoreNonce),
-      },
-      contractAddress: raw.contractAddress,
-    };
-  } catch {
-    return null;
+  const walletChoice = await ask('\n> ');
+  const walletCtx =
+    walletChoice.trim() === '2'
+      ? await buildWallet(DEVNET_CONFIG, await ask('Enter seed: '))
+      : await buildFreshWallet(DEVNET_CONFIG);
+
+  const providers = await createProviders(walletCtx, DEVNET_CONFIG);
+
+  console.log('\n1) Deploy new contract');
+  console.log('2) Join existing contract');
+
+  const deployChoice = await ask('\n> ');
+
+  let contract: any;
+  const scoreInput = BigInt(await ask('Enter your reputation score (0-100): '));
+  const nonce = randomBytes(32);
+
+  if (deployChoice.trim() === '1') {
+    contract = await deployTrustWork(providers, scoreInput, nonce);
+  } else {
+    const addr = await ask('Enter contract address: ');
+    contract = await joinTrustWork(providers, addr, scoreInput, nonce);
   }
-}
 
-function saveState(privateState: TrustWorkPrivateState, contractAddress: string) {
-  fs.writeFileSync(
-    STATE_FILE,
-    JSON.stringify({
-      secretKey: Array.from(privateState.secretKey),
-      reputationScore: privateState.reputationScore,
-      scoreNonce: Array.from(privateState.scoreNonce),
-      contractAddress,
-    }),
-    "utf-8"
-  );
-  console.log(`\nPrivate state saved to ${STATE_FILE}`);
-}
+  while (true) {
+    console.log('\n1) Register score on-chain');
+    console.log('2) Verify score above threshold');
+    console.log('3) Check contract state');
+    console.log('4) Exit');
 
-function prompt(question: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => { rl.close(); resolve(answer.trim()); });
-  });
-}
+    const action = await ask('\n> ');
 
-async function main() {
-  const [, , command, ...args] = process.argv;
-  console.log("\nTrustWork Proof of Reputation - Midnight Network");
-  console.log("=================================================");
-
-  switch (command) {
-    case "deploy": {
-      const { buildMidnightProviders } = await import("./providers");
-      const providers = await buildMidnightProviders();
-      const deployed = await TrustWorkAPI.deploy(providers, providers.walletProvider);
-      console.log(`\nContract Address: ${deployed.deployTxData.public.contractAddress}`);
+    if (action.trim() === '1') {
+      await register(contract);
+    } else if (action.trim() === '2') {
+      const threshold = BigInt(await ask('Enter threshold: '));
+      await verifyAboveThreshold(contract, threshold);
+    } else if (action.trim() === '3') {
+      const state = await getContractState(providers, contract.deployTxData.public.contractAddress);
+      console.log('Contract state:', state);
+    } else if (action.trim() === '4') {
       break;
     }
-    case "register": {
-      const scoreInput = await prompt("Enter your reputation score (0-100): ");
-      const score = parseInt(scoreInput, 10);
-      if (isNaN(score) || score < 0 || score > 100) {
-        console.error("Invalid score."); process.exit(1);
-      }
-      const contractAddress = await prompt("Enter the contract address: ");
-      const privateState = createWorkerPrivateState(score);
-      const { buildMidnightProviders } = await import("./providers");
-      const providers = await buildMidnightProviders();
-      const contract = await (providers as any).midnight.findDeployedContract(contractAddress);
-      await TrustWorkAPI.register(contract, privateState, providers);
-      saveState(privateState, contractAddress);
-      console.log(`\nRegistered. Your score (${score}) is private.`);
-      break;
-    }
-    case "verify": {
-      const saved = loadState();
-      if (!saved) { console.error("Run register first."); process.exit(1); }
-      const thresholdInput = args[0] || await prompt("Enter threshold (0-100): ");
-      const threshold = parseInt(thresholdInput, 10);
-      const { buildMidnightProviders } = await import("./providers");
-      const providers = await buildMidnightProviders();
-      const contract = await (providers as any).midnight.findDeployedContract(saved.contractAddress);
-      const passed = await TrustWorkAPI.verifyAboveThreshold(
-        contract, threshold, saved.privateState, providers
-      );
-      console.log(passed
-        ? `\nVERIFIED: Score is at or above ${threshold}.`
-        : `\nNOT VERIFIED: Score does not meet threshold of ${threshold}.`
-      );
-      break;
-    }
-    case "status": {
-      const saved = loadState();
-      const address = saved?.contractAddress || await prompt("Enter contract address: ");
-      const { buildMidnightProviders } = await import("./providers");
-      const providers = await buildMidnightProviders();
-      const contract = await (providers as any).midnight.findDeployedContract(address);
-      const registered = await TrustWorkAPI.isRegistered(contract);
-      const count = await TrustWorkAPI.getWorkerCount(contract);
-      console.log(`\nRegistered: ${registered}`);
-      console.log(`Total workers: ${count}`);
-      break;
-    }
-    default:
-      console.log("\nCommands: deploy | register | verify [threshold] | status");
   }
-}
 
-main().catch((err) => { console.error("\nError:", err.message || err); process.exit(1); });
+  await walletCtx.wallet.stop();
+  rli.close();
+  console.log('\nGoodbye.');
+};
+
+main().catch(console.error);
