@@ -1,74 +1,29 @@
-pragma language_version 0.16;
+pragma language_version 0.21;
 
 import CompactStandardLibrary;
 
-enum RegistrationState {
-  UNREGISTERED,
-  REGISTERED
-}
-
-export ledger worker_count: Counter;
-export ledger registration_state: RegistrationState;
 export ledger score_commitment: Bytes<32>;
-export ledger worker_key: Bytes<32>;
+export ledger is_registered: Boolean;
 export ledger round: Counter;
 
-constructor() {
-  registration_state = RegistrationState.UNREGISTERED;
-  score_commitment = pad(32, "");
-  worker_key = pad(32, "");
+witness secret_score(): Uint<64>;
+witness secret_nonce(): Bytes<32>;
+
+export circuit register(): [] {
+  const score: Uint<64> = secret_score();
+  const nonce: Bytes<32> = secret_nonce();
+  score_commitment = persistentCommit<Uint<64>>(score, nonce);
+  is_registered = true;
+  round.increment(1);
 }
 
-witness secretKey(): Bytes<32>;
-witness reputationScore(): Uint<32>;
-witness scoreNonce(): Bytes<32>;
-
-circuit deriveWorkerKey(round: Field, sk: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<3, Bytes<32>>>(
-    [pad(32, "trustwork:reputation:v1"), round as Bytes<32>, sk]
+export circuit verify_above_threshold(threshold: Uint<64>): [] {
+  const score: Uint<64> = secret_score();
+  const nonce: Bytes<32> = secret_nonce();
+  assert(is_registered, "Worker has not registered a score");
+  assert(
+    persistentCommit<Uint<64>>(score, nonce) == score_commitment,
+    "Score commitment does not match registered value"
   );
-}
-
-circuit deriveCommitment(score: Uint<32>, nonce: Bytes<32>): Bytes<32> {
-  return persistentCommit<Uint<32>>(score, nonce);
-}
-
-export circuit register(initial_score: Uint<32>): [] {
-  assert(registration_state == RegistrationState.UNREGISTERED,
-    "Worker already registered");
-  const sk = secretKey();
-  const score = reputationScore();
-  const nonce = scoreNonce();
-  assert(score >= 0 as Uint<32>, "Score must be at least 0");
-  assert(score <= 100 as Uint<32>, "Score must be at most 100");
-  assert(score == initial_score, "Score mismatch");
-  const wk = deriveWorkerKey(round, sk);
-  const commitment = deriveCommitment(score, nonce);
-  worker_key = disclose(wk);
-  score_commitment = disclose(commitment);
-  registration_state = RegistrationState.REGISTERED;
-  worker_count.increment(1);
-}
-
-export circuit verify_above_threshold(threshold: Uint<32>): Boolean {
-  assert(registration_state == RegistrationState.REGISTERED,
-    "Worker not registered");
-  assert(threshold <= 100 as Uint<32>, "Threshold must be at most 100");
-  const sk = secretKey();
-  const score = reputationScore();
-  const nonce = scoreNonce();
-  const wk = deriveWorkerKey(round, sk);
-  assert(worker_key == wk, "Unauthorized: key mismatch");
-  const commitment = deriveCommitment(score, nonce);
-  assert(score_commitment == commitment, "Commitment mismatch");
-  assert(score >= threshold, "Score is below the required threshold");
-  return true;
-}
-
-export circuit get_worker_count(): Uint<64> {
-  return worker_count as Uint<64>;
-}
-
-export circuit is_registered(): Boolean {
-  return registration_state == RegistrationState.REGISTERED;
+  assert(score >= threshold, "Score does not meet the required threshold");
 }
