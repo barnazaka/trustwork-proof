@@ -9,12 +9,13 @@
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "outDir": "dist"
+    "outDir": "../dist/api",
+    "rootDir": "../"
   },
   "ts-node": {
     "esm": true,
     "experimentalSpecifierResolution": "node"
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*.ts", "../contract/src/**/*.ts"],
+  "exclude": ["node_modules"]
 }
